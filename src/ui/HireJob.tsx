@@ -138,7 +138,13 @@ export function HireJob({
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   const [openPath, setOpenPath] = useState("");
+  const [nowMs, setNowMs] = useState(0);
   const jobRef = useRef<JobView | null>(null);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -165,6 +171,7 @@ export function HireJob({
     if (!next) return;
     jobRef.current = next;
     setJob(next);
+    setNowMs(Date.now());
     const mine = owner === next.sellerOwner ? next.sellerPlatformId : next.buyerPlatformId;
     const other = mine === next.sellerPlatformId ? next.buyerPlatformId : next.sellerPlatformId;
     const [buyer, seller, peers, audit] = await Promise.all([
@@ -429,7 +436,7 @@ export function HireJob({
           {step === "refund"
             ? "Working…"
             : job.closeRequested
-              ? job.refundReadyAt && Date.now() >= job.refundReadyAt
+              ? job.refundReadyAt && nowMs >= job.refundReadyAt
                 ? "Complete the refund"
                 : "Refund requested"
               : "Refund the deposit"}
@@ -437,7 +444,7 @@ export function HireJob({
       ) : null}
       {job && job.closeRequested && !job.refundSignature ? (
         <p className="text-sm text-ink-2">
-          {job.refundReadyAt && Date.now() >= job.refundReadyAt
+          {job.refundReadyAt && nowMs >= job.refundReadyAt
             ? "The refund can be completed now."
             : `The refund unlocks ${when(job.refundReadyAt ?? 0)}. No one else has to sign anything.`}
         </p>
@@ -460,7 +467,7 @@ export function HireJob({
               ? `The hired agent is working now. New steps appear here as they happen.${(() => {
                   const lastAt = (job.workLog ?? []).at(-1)?.at;
                   if (!lastAt) return "";
-                  const seconds = Math.max(0, Math.floor((Date.now() - lastAt) / 1000));
+                  const seconds = Math.max(0, Math.floor((Math.max(nowMs, lastAt) - lastAt) / 1000));
                   return seconds > 120
                     ? ` Last step ${Math.floor(seconds / 60)}m ${seconds % 60}s ago. No new step for a while, it may be stuck. Keep this page open and the pass restarts on its own.`
                     : ` Last step ${seconds}s ago.`;
@@ -510,7 +517,7 @@ export function HireJob({
                 </li>
               ))}
             </ol>
-            {lines.length === 0 ? <p className="mt-2 text-sm text-ink-2">The hired agent's reply shows here.</p> : null}
+            {lines.length === 0 ? <p className="mt-2 text-sm text-ink-2">Replies from the hired agent show here.</p> : null}
           </section>
           <section className="rounded-2xl border border-line bg-surface p-6">
             <h2 className="font-display text-lg font-bold text-ink">Hire log</h2>

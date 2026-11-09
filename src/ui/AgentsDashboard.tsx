@@ -391,24 +391,7 @@ export function AgentsDashboard({
   const [modelProviderName, setModelProviderName] = useState("openai");
   const [modelCredential, setModelCredential] = useState("");
   const [modelChoice, setModelChoice] = useState("gpt-4o");
-  const [agentProvider, setAgentProvider] = useState("muse");
-  const [agentChoice, setAgentChoice] = useState("muse-image-1.0");
-
-  // The per-agent picker opens on the agent's saved choice, then the owner
-  // model, so an existing agent shows the model it really runs on.
-  useEffect(() => {
-    const pick = detail?.agent.agentModel;
-    if (pick) {
-      setAgentProvider(pick.provider);
-      setAgentChoice(pick.modelId);
-      return;
-    }
-    const first = modelLinks[0];
-    if (first) {
-      setAgentProvider(first.provider);
-      setAgentChoice(first.modelId);
-    }
-  }, [detail?.agent.platformId, detail?.agent.agentModel?.provider, detail?.agent.agentModel?.modelId, modelLinks]);
+  const [agentPick, setAgentPick] = useState<{ platformId: string; provider: string; modelId: string } | null>(null);
   const [files, setFiles] = useState<Record<string, string>>({});
   const [skillSlugInput, setSkillSlugInput] = useState("");
   const [skillDescription, setSkillDescription] = useState("");
@@ -467,6 +450,7 @@ export function AgentsDashboard({
     [apiBase, token]
   );
 
+  const modelSynced = useRef(false);
   useEffect(() => {
     const saved = sessionStorage.getItem(sessionKey);
     const savedWallet = sessionStorage.getItem(`${sessionKey}.wallet`);
@@ -483,23 +467,22 @@ export function AgentsDashboard({
       .then((json) => setAgents((json.agents as PublicAgent[]) ?? []))
       .catch((err: Error) => setError(err.message));
     void api("GET", "/providers")
-      .then((json) => setModelLinks((json.providers as { provider: string; hint: string; modelId: string; status: string; updatedAt?: number }[]) ?? []))
+      .then((json) => {
+        const links = (json.providers as { provider: string; hint: string; modelId: string; status: string; updatedAt?: number }[]) ?? [];
+        setModelLinks(links);
+        // Start the picker on what is stored, not on provider defaults, so a
+        // later click cannot silently switch back to the first list entry.
+        if (!modelSynced.current && links.length > 0) {
+          modelSynced.current = true;
+          const latest = [...links].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0];
+          if (latest) {
+            setModelProviderName(latest.provider);
+            setModelChoice(latest.modelId);
+          }
+        }
+      })
       .catch(() => setModelLinks([]));
   }, [api, token]);
-
-  // The picker starts on what is actually stored, not on provider defaults,
-  // so opening this page can never make a later click silently switch the
-  // owner back to the first model in the list.
-  const modelSynced = useRef(false);
-  useEffect(() => {
-    if (modelSynced.current || modelLinks.length === 0) return;
-    modelSynced.current = true;
-    const latest = [...modelLinks].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0];
-    if (latest) {
-      setModelProviderName(latest.provider);
-      setModelChoice(latest.modelId);
-    }
-  }, [modelLinks]);
 
   async function sign(message: string): Promise<string> {
     if (!signMessage) throw new Error("This wallet cannot sign messages.");
@@ -751,7 +734,8 @@ export function AgentsDashboard({
     const saved = sessionStorage.getItem(`${sessionKey}.notice`);
     if (!saved) return;
     sessionStorage.removeItem(`${sessionKey}.notice`);
-    setNotice(saved);
+    const timer = window.setTimeout(() => setNotice(saved), 0);
+    return () => window.clearTimeout(timer);
   }, [screen, sessionKey]);
 
   useEffect(() => {
@@ -986,6 +970,15 @@ export function AgentsDashboard({
     { label: "Create the agent", done: Boolean(token) && modelReady && agents.length > 0, current: Boolean(token) && modelReady && agents.length === 0 },
   ];
   const activeLink = modelLinks.find((link) => link.provider === modelProviderName);
+  const agentOverride = detail && agentPick?.platformId === detail.agent.platformId ? agentPick : null;
+  const shownAgentProvider =
+    agentOverride?.provider ?? detail?.agent.agentModel?.provider ?? modelLinks[0]?.provider ?? "muse";
+  const shownAgentChoice =
+    agentOverride?.modelId ??
+    detail?.agent.agentModel?.modelId ??
+    modelLinks.find((link) => link.provider === shownAgentProvider)?.modelId ??
+    MODELS[shownAgentProvider as keyof typeof MODELS]?.[0] ??
+    "muse-image-1.0";
 
   return (
     <div className="hire-ui space-y-8">
@@ -1615,12 +1608,15 @@ export function AgentsDashboard({
                 <label className="block text-sm text-ink-2">
                   Provider
                   <select
-                    value={agentProvider}
+                    value={shownAgentProvider}
                     onChange={(event) => {
                       const next = event.target.value;
-                      setAgentProvider(next);
                       const existing = modelLinks.find((link) => link.provider === next);
-                      setAgentChoice(existing?.modelId ?? MODELS[next as keyof typeof MODELS][0]);
+                      setAgentPick({
+                        platformId: detail.agent.platformId,
+                        provider: next,
+                        modelId: existing?.modelId ?? MODELS[next as keyof typeof MODELS][0],
+                      });
                     }}
                     className="mt-1 w-full rounded-md border border-line-strong bg-bg px-3 py-2 text-ink"
                   >
@@ -1632,11 +1628,13 @@ export function AgentsDashboard({
                 <label className="block text-sm text-ink-2">
                   Model
                   <select
-                    value={agentChoice}
-                    onChange={(event) => setAgentChoice(event.target.value)}
+                    value={shownAgentChoice}
+                    onChange={(event) =>
+                      setAgentPick({ platformId: detail.agent.platformId, provider: shownAgentProvider, modelId: event.target.value })
+                    }
                     className="mt-1 w-full rounded-md border border-line-strong bg-bg px-3 py-2 text-ink"
                   >
-                    {MODELS[agentProvider as keyof typeof MODELS].map((id) => (
+                    {MODELS[shownAgentProvider as keyof typeof MODELS].map((id) => (
                       <option key={id} value={id}>{MODEL_LABELS[id] ?? id}</option>
                     ))}
                   </select>
@@ -1646,9 +1644,9 @@ export function AgentsDashboard({
                   className="rounded-md border border-line-strong px-3 py-2 text-sm text-ink"
                   onClick={() => {
                     setNotice("Saving the agent model.");
-                    void ownerCommand("model", `model: ${agentProvider}/${agentChoice}`, `/agents/${detail.agent.platformId}/model`, {
-                      provider: agentProvider,
-                      choice: agentChoice,
+                    void ownerCommand("model", `model: ${shownAgentProvider}/${shownAgentChoice}`, `/agents/${detail.agent.platformId}/model`, {
+                      provider: shownAgentProvider,
+                      choice: shownAgentChoice,
                     })
                       .then((json) => {
                         const saved = (json as { agent?: PublicAgent }).agent;
