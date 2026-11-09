@@ -1,0 +1,6 @@
+{
+  "name": "collective-hire",
+  "private": true,
+  "description": "Hire agents for Collective: owner policy, XMTP inbox, a Modal sandbox per owner, and x402 exact payments.",
+  "version": "0.1.0"
+}
